@@ -1,57 +1,156 @@
-# coolmac
+<div align="center">
 
-Your own clean-room fan control for Apple Silicon Macs — built from the
-publicly documented AppleSMC interface, not from any proprietary app.
+# CoolMac
 
-**Your machine (probed 2026-10-17):** MacBook Pro, Apple M5 Pro, 2 fans.
+**Free, open-source fan control for Apple Silicon Macs — with a dynamic, temperature-based fan curve.**
 
-## What the probe found
+![Swift](https://img.shields.io/badge/Swift-5.9+-orange?logo=swift&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-13+-black?logo=apple&logoColor=white)
+![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M--series-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Build](https://github.com/d4vz/coolmac/actions/workflows/build.yml/badge.svg)
+
+<img src="docs/screenshots/popover.png" width="300" alt="CoolMac menu-bar popover">
+<img src="docs/screenshots/app-curve.png" width="300" alt="CoolMac in Curve mode">
+
+</div>
+
+---
+
+## Why?
+
+Commercial fan-control apps put automatic, temperature-based fan curves
+behind a paywall. CoolMac is a clean-room, MIT-licensed implementation
+built from the publicly documented AppleSMC interface — the same public
+SMC key interface used by long-standing open-source projects. No
+proprietary code, no license checks, no telemetry. Just your fans,
+under your control.
+
+## Features
+
+- 🌡️ **Dynamic fan curve** — fan speed is interpolated smoothly from CPU
+  temperature (40 °C → 0%, 55 °C → 25%, 70 °C → 50%, 85 °C → 75%, 95 °C → 100%),
+  with a live chart showing where you are on the curve.
+- 🎚️ **Manual slider** — set a fixed fan speed from 0–100% (with the
+  equivalent RPM shown). Dragging the slider in Curve mode switches to
+  Manual, just like you'd expect.
+- 🤖 **Automatic mode** — hand control back to macOS at any time.
+- 📊 **Menu-bar popover** — hottest P-core temperature, per-fan RPM
+  gauges with min/max ranges, helper status, always one click away.
+  The status item itself shows `temp + RPM` at a fixed width, so the
+  popover anchors to the exact same spot on every click.
+- 🛡️ **Safety first** — a privileged helper daemon owns all SMC writes.
+  If the app crashes or is killed, the helper's watchdog reverts the
+  fans to system Auto within 15 seconds. Fan speeds are always clamped
+  to each fan's hardware min/max.
+
+## Tested on
+
+| Machine | Chip | Fans | Result |
+|---|---|---|---|
+| MacBook Pro (Mac17,8) | Apple M5 Pro | 2 (1,350–5,349 / 5,777 RPM) | ✅ Full read + control |
+
+Other Apple Silicon Macs with SMC fan keys (`FNum`, `F*Ac`, `F*Tg`,
+`F*md`) should work — please
+[open an issue](https://github.com/d4vz/coolmac/issues) with your
+`coolmac-probe` output either way.
+
+## Install
+
+> ⚠️ Quit any other fan-control app first — two controllers writing the
+> same SMC keys will fight over your fans.
+
+### 1. Build the app (no Xcode required, just Command Line Tools)
+
+```bash
+git clone https://github.com/d4vz/coolmac.git
+cd coolmac
+scripts/build-app.sh        # → dist/CoolMac.app (ad-hoc signed)
+open dist/CoolMac.app
+```
+
+### 2. Install the privileged helper
+
+Fan writes require root (verified: user-level SMC writes are denied on
+Apple Silicon). CoolMac ships a tiny helper daemon for that:
+
+```bash
+dist/CoolMac.app/Contents/Resources/install-helper.sh
+# or, from the repo:
+scripts/install-helper.sh
+```
+
+macOS will ask for your admin password. The helper:
+
+- runs as a root LaunchDaemon (`com.coolmac.helper`),
+- listens only on `/var/run/coolmac.sock` (root:admin, `0660`; only
+  root or the logged-in console user may connect),
+- understands four commands: `PING`, `AUTO`, `SET <0-100>`, `STATUS`,
+- **reverts fans to Auto if the app goes silent for 15 s.**
+
+Remove it any time with `scripts/uninstall-helper.sh` — it restores
+Auto before uninstalling.
+
+## How it works
+
+CoolMac talks to the AppleSMC user client via IOKit. Keys used
+(enumerated live on the test machine: 3,626 keys):
+
+| Key pattern | Meaning |
+|---|---|
+| `FNum` | Number of fans |
+| `F<i>Ac` | Fan *i* actual RPM (`flt`) |
+| `F<i>Tg` | Fan *i* target RPM (`flt`) — write |
+| `F<i>Mn` / `F<i>Mx` | Fan *i* hardware min / max RPM |
+| `F<i>md` | Fan *i* mode: `0` = system auto, `1` = manual — write |
+| `Tp*` | P-core temperatures (`flt`) — hottest one drives the curve |
+
+Check what your own Mac exposes with the bundled, read-only probe:
+
+```bash
+swift run coolmac-probe
+```
+
+## Project structure
 
 ```
-swift run coolmac-probe   # read-only, never writes to the SMC
+coolmac/
+├── Sources/
+│   ├── SMC/            # Public AppleSMC IOKit client (read/write, key enumeration)
+│   ├── CoolMacShared/  # App ↔ helper Unix-socket protocol
+│   ├── CoolMac/        # SwiftUI menu-bar app (popover + --window / --show-popover)
+│   ├── CoolMacHelper/  # Root helper daemon (SMC writes + watchdog)
+│   └── CoolMacProbe/   # Read-only CLI that dumps fan/temperature keys
+├── App/                # Info.plist + bundled helper installer
+├── LaunchDaemon/       # com.coolmac.helper.plist
+├── scripts/            # build-app.sh, install/uninstall-helper.sh, make-icon.swift
+└── docs/screenshots/
 ```
 
-- Fans: `FNum=2`, `F0/F1`: min 1,350 rpm, max ~5,349 / 5,777 rpm
-  (`F*Ac` actual, `F*Tg` target, `F*md` mode: 0 = auto, 1 = manual)
-- CPU temperature: `Tp*` keys (P-cores, hottest ≈ 44 °C at probe time)
-- 3,626 SMC keys total
+## Roadmap
 
-## Run
+- [ ] Editable curve points (drag the dots on the chart)
+- [ ] Presets: Silent / Balanced / Full blast
+- [ ] Draggable per-fan control
+- [ ] Signed + notarized releases (Developer ID)
+- [ ] `SMAppService` helper registration (no install script)
+- [ ] Login item / launch at login
 
-```
-swift run coolmac          # menu-bar app: "44°C  5361 rpm"
-swift run coolmac-probe    # dump fan + temperature keys
-```
+## Contributing
 
-Modes: **Automatic (system)**, **Dynamic curve** (default — fan % is
-interpolated from CPU temp: 40 °C→0 %, 55 °C→25 %, 70 °C→50 %,
-85 °C→75 %, 95 °C→100 %), **Manual** (fixed %).
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+A `coolmac-probe` dump from an untested machine is one of the most
+valuable contributions you can make.
 
-## Privileged helper
+## Disclaimer
 
-Fan writes need root (verified: user-level `F*Tg` writes are denied).
-`coolmac-helper` is a small root LaunchDaemon that owns all SMC writes
-and talks to the app over `/var/run/coolmac.sock` (root:admin, 0660;
-only root or the console user may connect).
+CoolMac is an independent open-source project, not affiliated with
+Apple, CrystalIdea (Macs Fan Control), or exelban (Stats) — though
+Stats is excellent and was the inspiration for this repo's layout.
+Controlling your fans overrides macOS thermal policy: use sane curves,
+keep an eye on temperatures, and understand that you do so at your
+own risk.
 
-```
-scripts/install-helper.sh     # builds, prompts for admin password
-scripts/uninstall-helper.sh   # reverts fans to Auto, removes helper
-```
+## License
 
-Protocol: `PING` · `AUTO` · `SET <0-100>` · `STATUS`.
-**Watchdog:** if the app sends nothing for 15 s (crash/kill), the
-helper reverts fans to system Auto — verified live.
-
-Verified end-to-end on the M5 Pro: `SET 30` → fans tracked
-2,549 rpm target at 2,553 rpm actual; curve mode drove fans
-dynamically with temperature; quit/kill restored Auto.
-
-## Known limits / next steps
-
-1. **Quit Macs Fan Control first** if it's running — two controllers
-   writing the same keys will fight.
-2. No full Xcode on this machine (Command Line Tools only), so this is
-   a SwiftPM executable for now; packaging as a signed `.app` with an
-   `SMAppService` helper (no manual install script) needs Xcode.
-3. Fan spin-up takes ~5–10 s; the curve polls every 2 s.
+[MIT](LICENSE) © 2026 Davi Orlandi

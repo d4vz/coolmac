@@ -1,0 +1,24 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Build app bundle (release)
+        run: scripts/build-app.sh
+
+      - name: Verify bundle signature
+        run: codesign --verify --verbose dist/CoolMac.app
