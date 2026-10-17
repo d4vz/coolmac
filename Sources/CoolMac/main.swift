@@ -1,5 +1,6 @@
 import AppKit
 import SMC
+import CoolMacShared
 
 // MARK: - Fan curve
 
@@ -38,6 +39,7 @@ final class FanController {
     var manualPercent: Double = 50
     var curve = FanCurve()
     private(set) var lastWriteOK = true
+    private(set) var helperAvailable = false
     private var lastAppliedPercent: Double = -1
 
     var isAvailable: Bool { smc != nil }
@@ -64,10 +66,32 @@ final class FanController {
 
     func fanCount() -> Int { Int(smc?.read("FNum")?.double ?? 0) }
 
-    /// Apply the current mode. Writes need root (a privileged helper,
-    /// planned); as a normal user process they fail and we report that
-    /// instead of pretending control worked.
+    /// Apply the current mode. Preferred path: the root helper over its
+    /// Unix socket (called every tick — it dedupes and its watchdog
+    /// reverts to Auto if we go silent). Fallback: a direct SMC write,
+    /// which normally fails without root; we report that, never fake it.
     func apply(cpuTemp: Double) {
+        let command: String
+        switch mode {
+        case .auto:
+            command = "AUTO"
+        case .curve:
+            command = String(format: "SET %.0f", curve.percent(for: cpuTemp))
+        case .manual:
+            command = String(format: "SET %.0f", manualPercent)
+        }
+
+        if let reply = HelperProtocol.send(command) {
+            helperAvailable = true
+            lastWriteOK = reply.hasPrefix("OK")
+            lastAppliedPercent = -1 // helper owns dedupe state
+            return
+        }
+        helperAvailable = false
+        applyDirect(cpuTemp: cpuTemp)
+    }
+
+    private func applyDirect(cpuTemp: Double) {
         guard let smc else { return }
         switch mode {
         case .auto:
@@ -91,6 +115,7 @@ final class FanController {
     }
 
     func restoreAuto() {
+        if HelperProtocol.send("AUTO") != nil { return }
         guard let smc else { return }
         for fan in 0..<fanCount() { smc.write("F\(fan)md", value: .uint8("F\(fan)md", 0)) }
     }
@@ -134,8 +159,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if controller.mode == .curve {
             menu.addItem(disabledItem(String(format: "Curve target: %.0f%%", controller.curve.percent(for: cpuTemp))))
         }
+        menu.addItem(disabledItem(controller.helperAvailable
+            ? "Privileged helper: connected"
+            : "Privileged helper: not installed - run scripts/install-helper.sh"))
         if !controller.lastWriteOK && controller.mode != .auto {
-            menu.addItem(disabledItem("Fan writes denied - privileged helper needed (see README)"))
+            menu.addItem(disabledItem("Last fan write failed (SMC denied)"))
         }
         if isMacsFanControlRunning() {
             menu.addItem(disabledItem("Warning: Macs Fan Control is running - quit it to avoid conflicts"))

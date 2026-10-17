@@ -7,17 +7,23 @@ let package = Package(
     products: [
         .executable(name: "coolmac", targets: ["CoolMac"]),
         .executable(name: "coolmac-probe", targets: ["CoolMacProbe"]),
+        .executable(name: "coolmac-helper", targets: ["CoolMacHelper"]),
     ],
     targets: [
         .target(name: "SMC", linkerSettings: [.linkedFramework("IOKit")]),
+        .target(name: "CoolMacShared"),
         .executableTarget(
             name: "CoolMacProbe",
             dependencies: ["SMC"],
             linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("CoreFoundation")]
         ),
         .executableTarget(
+            name: "CoolMacHelper",
+            dependencies: ["SMC", "CoolMacShared"]
+        ),
+        .executableTarget(
             name: "CoolMac",
-            dependencies: ["SMC"],
+            dependencies: ["SMC", "CoolMacShared"],
             linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("AppKit")]
         ),
     ]
