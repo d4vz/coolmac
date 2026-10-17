@@ -113,6 +113,16 @@ struct ContentView: View {
 
     // MARK: Slider / curve
 
+    /// In Manual the slider is the setpoint. In Curve it follows the
+    /// live curve target — dragging it switches to Manual (the
+    /// Macs Fan Control behaviour). Disabled in Auto.
+    private var sliderBinding: Binding<Double> {
+        Binding(
+            get: { model.mode == .manual ? model.manualPercent : max(0, model.targetPercent) },
+            set: { model.manualPercent = $0 }
+        )
+    }
+
     @ViewBuilder
     private var controlSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -121,21 +131,22 @@ struct ContentView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(String(format: "%.0f%%", model.manualPercent))
+                Text(String(format: "%.0f%%", sliderBinding.wrappedValue))
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .monospacedDigit()
                 if let fan = model.fans.first {
-                    Text(String(format: "≈ %.0f rpm", fan.rpm(atPercent: model.manualPercent)))
+                    Text(String(format: "≈ %.0f rpm", fan.rpm(atPercent: sliderBinding.wrappedValue)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            Slider(value: $model.manualPercent, in: 0...100, step: 1) {
+            Slider(value: sliderBinding, in: 0...100, step: 1) {
                 Text("Fan speed")
             } onEditingChanged: { editing in
                 if !editing { model.sliderChanged() }
             }
+            .labelsHidden()
             .onChange(of: model.manualPercent) { _ in model.sliderChanged() }
             .disabled(model.mode == .auto)
             .opacity(model.mode == .auto ? 0.4 : 1)

@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var model: FanViewModel!
     private var timer: Timer?
+    private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         model = FanViewModel()
@@ -22,6 +23,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: ContentView(model: model))
+
+        // `coolmac --window`: same UI in a regular window (easier to
+        // keep open, and handy for screenshots/testing).
+        if CommandLine.arguments.contains("--window") {
+            NSApplication.shared.setActivationPolicy(.regular)
+            let hosting = NSHostingController(rootView: ContentView(model: model))
+            let win = NSWindow(contentViewController: hosting)
+            win.title = "CoolMac"
+            win.styleMask = [.titled, .closable, .miniaturizable]
+            win.setContentSize(NSSize(width: 384, height: 560))
+            win.center()
+            win.makeKeyAndOrderFront(nil)
+            window = win
+        }
 
         timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.model.refresh()
