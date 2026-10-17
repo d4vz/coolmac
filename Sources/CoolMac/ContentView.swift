@@ -3,16 +3,22 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var model: FanViewModel
 
+    /// One fixed size for popover and window: mode switches change the
+    /// middle section, never the overall height, so the popover's
+    /// anchor point is identical on every open.
+    static let popoverSize = NSSize(width: 352, height: 548)
+
     var body: some View {
         VStack(spacing: 14) {
             header
             fanGauges
             modePicker
             controlSection
+            Spacer(minLength: 0)
             footer
         }
         .padding(16)
-        .frame(width: 352)
+        .frame(width: Self.popoverSize.width, height: Self.popoverSize.height)
     }
 
     // MARK: Header — CPU temperature

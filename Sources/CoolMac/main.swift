@@ -12,17 +12,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model = FanViewModel()
         model.refresh()
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Fixed length, monospaced digits: a variable-length item moves
+        // in the menu bar every time the temp/RPM text changes width,
+        // and the popover anchored to it jumps around (or clips).
+        statusItem = NSStatusBar.system.statusItem(withLength: 112)
         if let button = statusItem.button {
             button.action = #selector(togglePopover(_:))
             button.target = self
+            button.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+            button.alignment = .center
         }
         updateStatusTitle()
 
+        // Fixed content size + no SwiftUI auto-sizing: the popover must
+        // never resize (chart vs. text differs per mode), otherwise
+        // AppKit re-anchors it on every mode switch / data refresh.
+        let hosting = NSHostingController(rootView: ContentView(model: model))
+        hosting.preferredContentSize = ContentView.popoverSize
+        hosting.sizingOptions = []
         popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: ContentView(model: model))
+        popover.contentSize = ContentView.popoverSize
+        popover.contentViewController = hosting
 
         // `coolmac --window`: same UI in a regular window (easier to
         // keep open, and handy for screenshots/testing).
@@ -32,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let win = NSWindow(contentViewController: hosting)
             win.title = "CoolMac"
             win.styleMask = [.titled, .closable, .miniaturizable]
-            win.setContentSize(NSSize(width: 384, height: 560))
+            win.setContentSize(ContentView.popoverSize)
             win.center()
             win.makeKeyAndOrderFront(nil)
             window = win
@@ -41,6 +53,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.model.refresh()
             self?.updateStatusTitle()
+        }
+
+        // `coolmac --show-popover`: open the popover on launch
+        // (screenshot / anchor regression check without a mouse click).
+        if CommandLine.arguments.contains("--show-popover"),
+           let button = statusItem.button {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.togglePopover(button)
+            }
         }
     }
 
@@ -59,6 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             model.refresh()
             updateStatusTitle()
+            popover.contentViewController?.preferredContentSize = ContentView.popoverSize
+            popover.contentSize = ContentView.popoverSize
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
