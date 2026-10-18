@@ -15,10 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.onRefreshPublished = { [weak self] in self?.updateStatusTitle() }
         model.refresh()
 
-        // Fixed length, monospaced digits: a variable-length item moves
-        // in the menu bar every time the temp text changes width,
-        // and the popover anchored to it jumps around (or clips).
-        statusItem = NSStatusBar.system.statusItem(withLength: 38)
+        // Length is set per-reading in updateStatusTitle (text width
+        // + 4pt): monospaced digits keep the width stable between
+        // digit-count changes, without worst-case dead padding.
+        statusItem = NSStatusBar.system.statusItem(withLength: 27)
         if let button = statusItem.button {
             button.action = #selector(togglePopover(_:))
             button.target = self
@@ -83,7 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusTitle() {
-        statusItem.button?.title = String(format: "%.0f\u{00B0}", model.cpuTemp)
+        let title = String(format: "%.0f\u{00B0}", model.cpuTemp)
+        statusItem.button?.title = title
+        if let font = statusItem.button?.font {
+            let textWidth = (title as NSString).size(withAttributes: [.font: font]).width
+            statusItem.length = ceil(textWidth) + 4
+        }
     }
 
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
