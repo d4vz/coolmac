@@ -10,7 +10,7 @@ struct ContentView: View {
         let height: CGFloat
         switch mode {
         case .auto: height = 300
-        case .curve: height = 528
+        case .curve: height = 512
         case .manual: height = 396
         }
         return NSSize(width: 352, height: height)
@@ -239,7 +239,7 @@ struct ContentView: View {
                 CurveChart(points: model.curvePoints, currentTemp: model.cpuTemp,
                            currentPercent: model.targetPercent,
                            onEdit: { model.updateCurvePoint(index: $0, temp: $1, percent: $2) })
-                    .frame(height: 118)
+                    .frame(height: 102)
                     .padding(.top, 2)
             }
         }
@@ -319,9 +319,6 @@ struct CurveChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Dynamic curve — temperature → fan speed")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
             GeometryReader { geo in
                 let size = geo.size
                 // True graph layout: Y tick labels on the left, X tick
