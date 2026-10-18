@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         model = FanViewModel()
+        model.onRefreshPublished = { [weak self] in self?.updateStatusTitle() }
         model.refresh()
 
         // Fixed length, monospaced digits: a variable-length item moves
@@ -66,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if model.mode != .auto { model.controller.restoreAuto() }
+        if model.mode != .auto { model.restoreAutoSync() }
     }
 
     private func updateStatusTitle() {
@@ -78,12 +79,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            model.refresh()
+            // Show first with last-known values, refresh after: a sensor
+            // scan (even cached) must never delay the popover appearing.
             updateStatusTitle()
             popover.contentViewController?.preferredContentSize = ContentView.popoverSize
             popover.contentSize = ContentView.popoverSize
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
+            model.refresh()
         }
     }
 }

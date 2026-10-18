@@ -41,6 +41,12 @@ enum ControlMode: String, CaseIterable, Identifiable {
 
 // MARK: - Sensors & fan control
 
+/// Not thread-safe by design: a single IOKit connection plus mutable
+/// state (`mode`, `manualPercent`, caches below, dedupe state).
+/// Every call into this class — SMC reads/writes and helper sends —
+/// is confined to `FanViewModel`'s dedicated serial queue (the quit
+/// path reaches it through that same queue synchronously), so no
+/// locking is needed in here as long as callers keep that rule.
 final class FanController {
     private let smc = SMCConnection()
     var mode: ControlMode = .curve
@@ -50,14 +56,27 @@ final class FanController {
     private(set) var helperAvailable = false
     private var lastAppliedPercent: Double = -1
 
+    /// Enumerating every SMC key costs ~3,700 IOKit calls (~0.7–0.9 s),
+    /// so do it once and reuse the Tp* subset. Only a successful,
+    /// non-empty enumeration is cached, so a transient failure retries
+    /// on the next refresh instead of disabling temperature reads.
+    private var cachedTempKeys: [String]?
+    private var cachedFanCount: Int?
+
     var isAvailable: Bool { smc != nil }
 
     /// Hottest P-core temperature key (Tp*) — the most responsive
     /// proxy for CPU load on Apple Silicon.
     func cpuTemperature() -> Double? {
         guard let smc else { return nil }
-        let temps = smc.allKeys()
-            .filter { $0.hasPrefix("Tp") }
+        let tempKeys: [String]
+        if let cachedTempKeys {
+            tempKeys = cachedTempKeys
+        } else {
+            tempKeys = smc.allKeys().filter { $0.hasPrefix("Tp") }
+            if !tempKeys.isEmpty { cachedTempKeys = tempKeys }
+        }
+        let temps = tempKeys
             .compactMap { smc.read($0)?.double }
             .filter { $0 > 1 && $0 < 130 }
         guard !temps.isEmpty else { return nil }
@@ -72,7 +91,12 @@ final class FanController {
         return (actual, lo, hi)
     }
 
-    func fanCount() -> Int { Int(smc?.read("FNum")?.double ?? 0) }
+    func fanCount() -> Int {
+        if let cachedFanCount { return cachedFanCount }
+        let count = Int(smc?.read("FNum")?.double ?? 0)
+        if count > 0 { cachedFanCount = count }
+        return count
+    }
 
     func targetPercent(cpuTemp: Double) -> Double {
         switch mode {

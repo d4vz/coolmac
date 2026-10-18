@@ -16,7 +16,19 @@ struct FanInfo: Identifiable {
     }
 }
 
-/// Updated only from the main run loop (AppDelegate timer + SwiftUI bindings).
+/// UI state lives on the main thread; all sensor/helper I/O lives on
+/// `ioQueue`. `FanController`/`SMCConnection` are not thread-safe, so
+/// every access to `controller` happens inside a block on that one
+/// serial queue — background refreshes, slider applies and the quit
+/// path can never race the IOKit connection or each other.
+///
+/// Synchronization rule: `mode`/`manualPercent` below are the source
+/// of truth and are only mutated on main. Queue work never reads them
+/// directly; the main-thread entry points snapshot them (and
+/// `cpuTemp`) as plain values and pass the snapshot in, and the queue
+/// work writes the snapshot into `controller` before using it.
+/// `@Published` results are only ever assigned inside
+/// `DispatchQueue.main.async` blocks.
 final class FanViewModel: ObservableObject {
     @Published private(set) var cpuTemp: Double = 0
     @Published private(set) var fans: [FanInfo] = []
@@ -26,53 +38,127 @@ final class FanViewModel: ObservableObject {
     @Published var mode: ControlMode = .curve {
         didSet {
             guard mode != oldValue else { return }
-            controller.mode = mode
             applyNow()
         }
     }
-    @Published var manualPercent: Double = 50 {
-        didSet {
-            controller.manualPercent = manualPercent
-        }
-    }
+    @Published var manualPercent: Double = 50
 
     let controller = FanController()
     let curvePoints: [(temp: Double, percent: Double)] = FanCurve().points
+    private let curve = FanCurve()
 
-    var targetPercent: Double { controller.targetPercent(cpuTemp: cpuTemp) }
+    /// Serial queue owning all SMC + helper-socket access.
+    private let ioQueue = DispatchQueue(label: "com.coolmac.sensor-io")
+    /// Main-thread only: a refresh already queued/running makes timer
+    /// ticks no-ops instead of piling up behind a slow helper socket.
+    private var refreshInFlight = false
+
+    /// Called on main after a refresh publishes fresh values
+    /// (AppDelegate uses it to update the menu-bar title immediately
+    /// rather than one timer tick late).
+    var onRefreshPublished: (() -> Void)?
+
+    /// Computed on main from main-owned state — deliberately does not
+    /// touch `controller` (queue-owned) from here.
+    var targetPercent: Double {
+        switch mode {
+        case .auto: return -1
+        case .curve: return curve.percent(for: cpuTemp)
+        case .manual: return manualPercent
+        }
+    }
 
     func refresh() {
-        let temp = controller.cpuTemperature() ?? cpuTemp
-        cpuTemp = temp
-        controller.apply(cpuTemp: temp)
-        helperConnected = controller.helperAvailable
-        lastWriteOK = controller.lastWriteOK
-        fans = (0..<controller.fanCount()).compactMap { i in
-            guard let f = controller.fanRPM(i) else { return nil }
-            return FanInfo(id: i, actual: f.actual, minRPM: f.min, maxRPM: f.max)
-        }
-        conflictingAppRunning = NSWorkspace.shared.runningApplications.contains {
-            ($0.bundleIdentifier ?? "").contains("macsfancontrol")
-                || ($0.localizedName ?? "") == "Macs Fan Control"
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        let modeSnapshot = mode
+        let manualSnapshot = manualPercent
+        let fallbackTemp = cpuTemp
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            self.controller.mode = modeSnapshot
+            self.controller.manualPercent = manualSnapshot
+            let temp = self.controller.cpuTemperature() ?? fallbackTemp
+            // Watchdog heartbeat: this apply (SET/AUTO to the helper)
+            // runs on every refresh tick, just off the main thread.
+            self.controller.apply(cpuTemp: temp)
+            let helper = self.controller.helperAvailable
+            let writeOK = self.controller.lastWriteOK
+            let fans = (0..<self.controller.fanCount()).compactMap { i -> FanInfo? in
+                guard let f = self.controller.fanRPM(i) else { return nil }
+                return FanInfo(id: i, actual: f.actual, minRPM: f.min, maxRPM: f.max)
+            }
+            DispatchQueue.main.async {
+                self.refreshInFlight = false
+                self.cpuTemp = temp
+                self.helperConnected = helper
+                self.lastWriteOK = writeOK
+                self.fans = fans
+                self.conflictingAppRunning = NSWorkspace.shared.runningApplications.contains {
+                    ($0.bundleIdentifier ?? "").contains("macsfancontrol")
+                        || ($0.localizedName ?? "") == "Macs Fan Control"
+                }
+                self.onRefreshPublished?()
+            }
         }
     }
 
     /// Slider dragged: switch to Manual and push the new value now,
     /// without re-reading every sensor key.
     func sliderChanged() {
-        if mode != .manual { mode = .manual }
-        controller.manualPercent = manualPercent
+        if mode != .manual {
+            // Setting `mode` fires didSet -> applyNow(), which already
+            // snapshots the latest `manualPercent`.
+            mode = .manual
+            return
+        }
         applyNow()
     }
 
     func applyNow() {
-        controller.apply(cpuTemp: cpuTemp)
-        helperConnected = controller.helperAvailable
-        lastWriteOK = controller.lastWriteOK
+        let modeSnapshot = mode
+        let manualSnapshot = manualPercent
+        let tempSnapshot = cpuTemp
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            self.controller.mode = modeSnapshot
+            self.controller.manualPercent = manualSnapshot
+            self.controller.apply(cpuTemp: tempSnapshot)
+            let helper = self.controller.helperAvailable
+            let writeOK = self.controller.lastWriteOK
+            DispatchQueue.main.async {
+                self.helperConnected = helper
+                self.lastWriteOK = writeOK
+            }
+        }
     }
 
     func restoreAuto() {
-        mode = .auto
-        controller.restoreAuto()
+        if mode != .auto { mode = .auto }
+        let tempSnapshot = cpuTemp
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            self.controller.mode = .auto
+            self.controller.apply(cpuTemp: tempSnapshot)
+            self.controller.restoreAuto()
+            let helper = self.controller.helperAvailable
+            let writeOK = self.controller.lastWriteOK
+            DispatchQueue.main.async {
+                self.helperConnected = helper
+                self.lastWriteOK = writeOK
+            }
+        }
+    }
+
+    /// Synchronous final AUTO for quit: waits for any in-flight
+    /// refresh/apply on the serial queue, then restores Auto through
+    /// that same queue so it can't race the connection. Blocking the
+    /// main thread briefly here is intentional — the process is
+    /// exiting and the fans must not be left in a manual mode.
+    func restoreAutoSync() {
+        ioQueue.sync {
+            controller.mode = .auto
+            controller.restoreAuto()
+        }
     }
 }
