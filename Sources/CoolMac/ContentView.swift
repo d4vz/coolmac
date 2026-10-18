@@ -10,7 +10,7 @@ struct ContentView: View {
         let height: CGFloat
         switch mode {
         case .auto: height = 300
-        case .curve: height = 484
+        case .curve: height = 528
         case .manual: height = 396
         }
         return NSSize(width: 352, height: height)
@@ -239,7 +239,7 @@ struct ContentView: View {
                 CurveChart(points: model.curvePoints, currentTemp: model.cpuTemp,
                            currentPercent: model.targetPercent,
                            onEdit: { model.updateCurvePoint(index: $0, temp: $1, percent: $2) })
-                    .frame(height: 74)
+                    .frame(height: 118)
                     .padding(.top, 2)
             }
         }
@@ -324,20 +324,40 @@ struct CurveChart: View {
                 .foregroundStyle(.secondary)
             GeometryReader { geo in
                 let size = geo.size
-                // Inset the plot so dots at the temp/percent extremes render
-                // whole inside the bounds (draggable dot: 6.5pt radius +
+                // True graph layout: Y tick labels on the left, X tick
+                // labels below, 8pt headroom top/right so dots at the
+                // extremes render whole (draggable dot: 6.5pt radius +
                 // half its 1.5pt stroke = 7.25pt; current dot: 5.75pt).
-                let inset: CGFloat = 8
-                let plotWidth = max(1, size.width - inset * 2)
-                let plotHeight = max(1, size.height - inset * 2)
-                let x: (Double) -> CGFloat = { inset + CGFloat(($0 - 30) / 70) * plotWidth }   // 30–100°C
-                let y: (Double) -> CGFloat = { inset + (1 - CGFloat($0 / 100)) * plotHeight }
+                let left: CGFloat = 26, right: CGFloat = 8
+                let top: CGFloat = 8, bottom: CGFloat = 16
+                let plotWidth = max(1, size.width - left - right)
+                let plotHeight = max(1, size.height - top - bottom)
+                let x: (Double) -> CGFloat = { left + CGFloat(($0 - 30) / 70) * plotWidth }   // 30–100°C
+                let y: (Double) -> CGFloat = { top + (1 - CGFloat($0 / 100)) * plotHeight } // 0–100%
                 ZStack {
                     Canvas { context, _ in
+                        // Gridlines: horizontal every 25%, vertical every 10°C.
+                        for pct in [0.0, 25, 50, 75, 100] {
+                            var grid = Path()
+                            grid.move(to: CGPoint(x: left, y: y(pct)))
+                            grid.addLine(to: CGPoint(x: left + plotWidth, y: y(pct)))
+                            context.stroke(grid, with: .color(.primary.opacity(pct == 0 ? 0.3 : 0.09)), lineWidth: 1)
+                        }
+                        for temp in stride(from: 30.0, through: 100.0, by: 10.0) {
+                            var grid = Path()
+                            grid.move(to: CGPoint(x: x(temp), y: top))
+                            grid.addLine(to: CGPoint(x: x(temp), y: top + plotHeight))
+                            context.stroke(grid, with: .color(.primary.opacity(0.06)), lineWidth: 1)
+                        }
+                        // Curve: holds flat outside the first/last point,
+                        // exactly like the interpolation in FanCurve.
                         var line = Path()
-                        for (i, pt) in points.enumerated() {
-                            let point = CGPoint(x: x(pt.temp), y: y(pt.percent))
-                            if i == 0 { line.move(to: point) } else { line.addLine(to: point) }
+                        if let first = points.first, let last = points.last {
+                            line.move(to: CGPoint(x: left, y: y(first.percent)))
+                            for pt in points {
+                                line.addLine(to: CGPoint(x: x(pt.temp), y: y(pt.percent)))
+                            }
+                            line.addLine(to: CGPoint(x: left + plotWidth, y: y(last.percent)))
                         }
                         context.stroke(line, with: .color(.accentColor), lineWidth: 2)
                         if onEdit == nil {
@@ -352,6 +372,20 @@ struct CurveChart: View {
                         context.fill(Path(ellipseIn: dot), with: .color(.orange))
                         context.stroke(Path(ellipseIn: dot), with: .color(.white), lineWidth: 1.5)
                     }
+                    // Y tick labels (fan %).
+                    ForEach([0.0, 25, 50, 75, 100], id: \.self) { pct in
+                        Text(pct == 100 ? "100%" : "\(Int(pct))")
+                            .font(.system(size: 7.5))
+                            .foregroundStyle(.secondary)
+                            .position(x: left / 2, y: y(pct))
+                    }
+                    // X tick labels (temperature °C).
+                    ForEach(Array(stride(from: 30.0, through: 100.0, by: 10.0)), id: \.self) { temp in
+                        Text("\(Int(temp))°")
+                            .font(.system(size: 7.5))
+                            .foregroundStyle(.secondary)
+                            .position(x: x(temp), y: top + plotHeight + bottom / 2)
+                    }
                     if let onEdit {
                         ForEach(points.indices, id: \.self) { i in
                             Circle()
@@ -362,9 +396,9 @@ struct CurveChart: View {
                                 .gesture(
                                     DragGesture(minimumDistance: 0)
                                         .onChanged { value in
-                                            // Invert the same inset mapping used to place the dots.
-                                            let temp = 30 + Double((value.location.x - inset) / plotWidth) * 70
-                                            let percent = (1 - Double((value.location.y - inset) / plotHeight)) * 100
+                                            // Invert the same plot mapping used to place the dots.
+                                            let temp = 30 + Double((value.location.x - left) / plotWidth) * 70
+                                            let percent = (1 - Double((value.location.y - top) / plotHeight)) * 100
                                             onEdit(i, temp, percent)
                                         }
                                 )
