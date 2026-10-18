@@ -3,26 +3,33 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var model: FanViewModel
 
-    /// One fixed size for popover and window: mode switches change the
-    /// middle section, never the overall height, so the popover's
-    /// anchor point is identical on every open.
-    static let popoverSize = NSSize(width: 352, height: 548)
+    /// Fixed width, height depends only on the mode (changed
+    /// deliberately by the user, never by live data) — the popover's
+    /// top stays anchored under the status item on every open.
+    static func popoverSize(mode: ControlMode) -> NSSize {
+        let height: CGFloat
+        switch mode {
+        case .auto: height = 332
+        case .curve: height = 516
+        case .manual: height = 428
+        }
+        return NSSize(width: 352, height: height)
+    }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 10) {
             header
             fanGauges
-            ScrollView {
-                VStack(spacing: 14) {
-                    presetRow
-                    modePicker
-                    controlSection
-                }
+            presetRow
+            modePicker
+            if model.mode != .auto {
+                controlSection
             }
+            Spacer(minLength: 0)
             footer
         }
-        .padding(16)
-        .frame(width: Self.popoverSize.width, height: Self.popoverSize.height)
+        .padding(12)
+        .frame(width: 352, height: Self.popoverSize(mode: model.mode).height)
     }
 
     // MARK: Header — CPU temperature
@@ -103,7 +110,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                .padding(.vertical, 8)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
             }
         }
@@ -178,19 +185,6 @@ struct ContentView: View {
                 }
             }
 
-            HStack {
-                Toggle("Link fans", isOn: $model.linkFans)
-                    .font(.caption)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                Spacer()
-                if !model.linkFans && model.mode == .curve {
-                    Text("Curve applies to both fans")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             if model.mode == .manual && !model.linkFans {
                 perFanSliders
             } else {
@@ -213,30 +207,15 @@ struct ContentView: View {
                 }
             }
 
-            if model.mode == .manual {
-                Text(model.linkFans
-                     ? "Drag to set a fixed speed — or switch to Curve for automatic temperature-based control."
-                     : "Fans are unlinked: set each fan separately (Manual only; Curve uses one shared curve).")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-
             if model.mode == .curve {
                 CurveChart(points: model.curvePoints, currentTemp: model.cpuTemp,
                            currentPercent: model.targetPercent,
                            onEdit: { model.updateCurvePoint(index: $0, temp: $1, percent: $2) })
                     .frame(height: 74)
                     .padding(.top, 2)
-                curvePointEditors
-            }
-
-            if model.mode == .auto {
-                Button("Fans are under system control") {}
-                    .disabled(true)
-                    .font(.caption)
             }
         }
-        .padding(12)
+        .padding(10)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
     }
 
@@ -275,64 +254,15 @@ struct ContentView: View {
         .onChange(of: model.fanPercents) { _ in model.fanSliderChanged() }
     }
 
-    private var curvePointEditors: some View {
-        VStack(spacing: 4) {
-            HStack {
-                Text("Curve points (drag dots or use steppers)")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Reset curve") { model.resetCurve() }
-                    .controlSize(.small)
-                    .font(.system(size: 10))
-            }
-            ForEach(model.curvePoints.indices, id: \.self) { i in
-                HStack(spacing: 4) {
-                    Text("P\(i + 1)")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20, alignment: .leading)
-                    Stepper {
-                        Text(String(format: "%.0f°C", model.curvePoints[i].temp))
-                            .font(.system(size: 11)).monospacedDigit()
-                    } onIncrement: {
-                        model.updateCurvePoint(index: i, temp: model.curvePoints[i].temp + 1)
-                    } onDecrement: {
-                        model.updateCurvePoint(index: i, temp: model.curvePoints[i].temp - 1)
-                    }
-                    .accessibilityLabel("Point \(i + 1) temperature")
-                    Spacer()
-                    Stepper {
-                        Text(String(format: "%.0f%%", model.curvePoints[i].percent))
-                            .font(.system(size: 11)).monospacedDigit()
-                    } onIncrement: {
-                        model.updateCurvePoint(index: i, percent: model.curvePoints[i].percent + 1)
-                    } onDecrement: {
-                        model.updateCurvePoint(index: i, percent: model.curvePoints[i].percent - 1)
-                    }
-                    .accessibilityLabel("Point \(i + 1) percent")
-                }
-            }
-            if !model.linkFans {
-                Text("Unlinked fans share this curve in Curve mode; per-fan sliders are available in Manual mode.")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
     // MARK: Footer
 
     private var footer: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(model.helperConnected ? Color.green : Color.red)
-                    .frame(width: 8, height: 8)
-                Text(model.helperConnected ? "Helper connected" : "Helper not installed — run scripts/install-helper.sh")
+        VStack(spacing: 6) {
+            if !model.helperConnected {
+                Label("Helper not installed — run scripts/install-helper.sh", systemImage: "exclamationmark.triangle")
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                Spacer()
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             if !model.lastWriteOK && model.mode != .auto {
                 Label("Last fan write failed", systemImage: "exclamationmark.triangle")
@@ -346,28 +276,26 @@ struct ContentView: View {
                     .foregroundStyle(.orange)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack(spacing: 8) {
-                Toggle("Launch at login", isOn: Binding(
-                    get: { model.launchAtLogin },
-                    set: { model.setLaunchAtLogin($0) }))
-                    .font(.system(size: 10))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .disabled(!model.canLaunchAtLogin)
-                if !model.canLaunchAtLogin {
-                    Text("Needs CoolMac.app bundle")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
             HStack {
-                Button("Restore Auto") { model.restoreAuto() }
-                    .controlSize(.small)
+                Menu {
+                    Toggle("Link fans", isOn: $model.linkFans)
+                    Toggle("Launch at login", isOn: Binding(
+                        get: { model.launchAtLogin },
+                        set: { model.setLaunchAtLogin($0) }))
+                        .disabled(!model.canLaunchAtLogin)
+                    Divider()
+                    Button("Restore Auto") { model.restoreAuto() }
+                    Button("Reset curve") { model.resetCurve() }
+                    Divider()
+                    Button("Quit CoolMac") { NSApplication.shared.terminate(nil) }
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 13))
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 28, alignment: .leading)
+                .help(model.canLaunchAtLogin ? "Settings" : "Settings (Launch at login needs the CoolMac.app bundle)")
                 Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
-                    .controlSize(.small)
-                    .keyboardShortcut("q")
             }
         }
     }

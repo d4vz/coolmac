@@ -32,9 +32,8 @@ under your control.
   temperature (40 °C → 0%, 55 °C → 25%, 70 °C → 50%, 85 °C → 75%, 95 °C → 100%),
   with a live chart showing where you are on the curve.
 - ✏️ **Editable curve points** — drag the chart dots (vertically for %,
-  horizontally for °C, clamped between neighbours) or use the per-point
-  steppers below the chart. Points persist across launches; "Reset curve"
-  restores the defaults.
+  horizontally for °C, clamped between neighbours). Points persist
+  across launches; "Reset curve" in the ⚙️ menu restores the defaults.
 - 🎛️ **Presets** — Silent (gentle curve, max 70%), Balanced (default
   curve) and Full blast (Manual 100%). The active preset stays
   highlighted until you edit the curve or drag a slider.
@@ -49,9 +48,11 @@ under your control.
   needed; only available when running from the `CoolMac.app` bundle.
 - 🤖 **Automatic mode** — hand control back to macOS at any time.
 - 📊 **Menu-bar popover** — hottest P-core temperature, per-fan RPM
-  gauges with min/max ranges, helper status, always one click away.
-  The status item itself shows `temp + RPM` at a fixed width, so the
-  popover anchors to the exact same spot on every click.
+  gauges with min/max ranges, always one click away. Link fans
+  (default on), launch at login, restore-Auto and curve reset live
+  under the ⚙️ settings menu. The status item itself shows just the
+  temperature at a fixed width, so the popover anchors to the exact
+  same spot on every click.
 - 🛡️ **Safety first** — a privileged helper daemon owns all SMC writes.
   If the app crashes or is killed, the helper's watchdog reverts the
   fans to system Auto within 15 seconds. Fan speeds are always clamped
@@ -145,7 +146,7 @@ coolmac/
 
 ## Roadmap
 
-- [x] Editable curve points (drag the dots on the chart, or use steppers)
+- [x] Editable curve points (drag the dots on the chart)
 - [x] Presets: Silent / Balanced / Full blast
 - [x] Draggable per-fan control (unlink fans in Manual mode)
 - [ ] Signed + notarized releases (Developer ID) — blocked: needs a paid Apple Developer ID

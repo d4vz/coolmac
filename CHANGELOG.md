@@ -4,10 +4,18 @@ All notable changes to CoolMac are documented here.
 
 ## [Unreleased]
 
+### Changed
+- Popover cleanup: curve-point stepper list removed (dots still
+  drag); ⚙️ settings menu now holds Link fans, Launch at login,
+  Restore Auto, Reset curve and Quit; Auto mode hides the fan-speed
+  slider entirely; menu-bar item shows temperature only; "Helper
+  connected" line removed (warnings only); tighter padding, no
+  scrolling, mode-sized popover height.
+
 ### Added
-- Editable curve points: drag the chart dots or use per-point
-  temperature/percent steppers; persisted in UserDefaults
-  (`curvePoints`), live-applied, with a "Reset curve" action.
+- Editable curve points: drag the chart dots; persisted in
+  UserDefaults (`curvePoints`), live-applied, with a "Reset curve"
+  action.
 - Presets: Silent and Balanced apply persisted curves in Curve mode,
   Full blast switches to Manual 100%; the active preset is highlighted
   and persisted (`activePreset`) until the curve/sliders are edited.

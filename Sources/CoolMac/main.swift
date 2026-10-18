@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -7,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var model: FanViewModel!
     private var timer: Timer?
     private var window: NSWindow?
+    private var sizeCancellable: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         model = FanViewModel()
@@ -14,9 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.refresh()
 
         // Fixed length, monospaced digits: a variable-length item moves
-        // in the menu bar every time the temp/RPM text changes width,
+        // in the menu bar every time the temp text changes width,
         // and the popover anchored to it jumps around (or clips).
-        statusItem = NSStatusBar.system.statusItem(withLength: 112)
+        statusItem = NSStatusBar.system.statusItem(withLength: 48)
         if let button = statusItem.button {
             button.action = #selector(togglePopover(_:))
             button.target = self
@@ -25,17 +27,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         updateStatusTitle()
 
-        // Fixed content size + no SwiftUI auto-sizing: the popover must
-        // never resize (chart vs. text differs per mode), otherwise
-        // AppKit re-anchors it on every mode switch / data refresh.
+        // Explicit content size + no SwiftUI auto-sizing: the height
+        // changes only when the user switches mode (Auto hides the
+        // slider), never with live data, and we resize it ourselves.
         let hosting = NSHostingController(rootView: ContentView(model: model))
-        hosting.preferredContentSize = ContentView.popoverSize
+        hosting.preferredContentSize = ContentView.popoverSize(mode: model.mode)
         hosting.sizingOptions = []
         popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = ContentView.popoverSize
+        popover.contentSize = ContentView.popoverSize(mode: model.mode)
         popover.contentViewController = hosting
+        sizeCancellable = model.$mode
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.applyContentSize() }
 
         // `coolmac --window`: same UI in a regular window (easier to
         // keep open, and handy for screenshots/testing).
@@ -45,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let win = NSWindow(contentViewController: hosting)
             win.title = "CoolMac"
             win.styleMask = [.titled, .closable, .miniaturizable]
-            win.setContentSize(ContentView.popoverSize)
+            win.setContentSize(ContentView.popoverSize(mode: model.mode))
             win.center()
             win.makeKeyAndOrderFront(nil)
             window = win
@@ -70,9 +75,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if model.mode != .auto { model.restoreAutoSync() }
     }
 
+    private func applyContentSize() {
+        let size = ContentView.popoverSize(mode: model.mode)
+        popover?.contentViewController?.preferredContentSize = size
+        popover?.contentSize = size
+        window?.setContentSize(size)
+    }
+
     private func updateStatusTitle() {
-        let fan0 = model.fans.first?.actual ?? 0
-        statusItem.button?.title = String(format: "%.0f\u{00B0}C  %.0f rpm", model.cpuTemp, fan0)
+        statusItem.button?.title = String(format: "%.0f\u{00B0}", model.cpuTemp)
     }
 
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
@@ -82,8 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Show first with last-known values, refresh after: a sensor
             // scan (even cached) must never delay the popover appearing.
             updateStatusTitle()
-            popover.contentViewController?.preferredContentSize = ContentView.popoverSize
-            popover.contentSize = ContentView.popoverSize
+            applyContentSize()
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             model.refresh()
