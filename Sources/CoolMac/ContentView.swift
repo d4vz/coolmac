@@ -3,17 +3,12 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var model: FanViewModel
 
-    /// Fixed width, height depends only on the mode (changed
-    /// deliberately by the user, never by live data) — the popover's
-    /// top stays anchored under the status item on every open.
+    /// One fixed size for every mode: switching Auto/Curve/Manual (or
+    /// Silent/Balanced/Full blast) must never resize the popover, or
+    /// the whole layout appears to scroll up and down. Shorter modes
+    /// simply leave calm empty space below the controls.
     static func popoverSize(mode: ControlMode) -> NSSize {
-        let height: CGFloat
-        switch mode {
-        case .auto: height = 300
-        case .curve: height = 512
-        case .manual: height = 396
-        }
-        return NSSize(width: 352, height: height)
+        NSSize(width: 352, height: 512)
     }
 
     var body: some View {
