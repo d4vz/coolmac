@@ -31,9 +31,22 @@ under your control.
 - 🌡️ **Dynamic fan curve** — fan speed is interpolated smoothly from CPU
   temperature (40 °C → 0%, 55 °C → 25%, 70 °C → 50%, 85 °C → 75%, 95 °C → 100%),
   with a live chart showing where you are on the curve.
+- ✏️ **Editable curve points** — drag the chart dots (vertically for %,
+  horizontally for °C, clamped between neighbours) or use the per-point
+  steppers below the chart. Points persist across launches; "Reset curve"
+  restores the defaults.
+- 🎛️ **Presets** — Silent (gentle curve, max 70%), Balanced (default
+  curve) and Full blast (Manual 100%). The active preset stays
+  highlighted until you edit the curve or drag a slider.
 - 🎚️ **Manual slider** — set a fixed fan speed from 0–100% (with the
   equivalent RPM shown). Dragging the slider in Curve mode switches to
   Manual, just like you'd expect.
+- 👯 **Per-fan control** — turn off "Link fans" to set Fan 1 and Fan 2
+  independently in Manual mode (`SET2` to the helper). In Curve mode
+  both fans share the one curve.
+- 🚀 **Launch at login** — optional per-user LaunchAgent
+  (`~/Library/LaunchAgents/com.github.d4vz.coolmac.plist`), no admin
+  needed; only available when running from the `CoolMac.app` bundle.
 - 🤖 **Automatic mode** — hand control back to macOS at any time.
 - 📊 **Menu-bar popover** — hottest P-core temperature, per-fan RPM
   gauges with min/max ranges, helper status, always one click away.
@@ -85,7 +98,10 @@ macOS will ask for your admin password. The helper:
 - runs as a root LaunchDaemon (`com.coolmac.helper`),
 - listens only on `/var/run/coolmac.sock` (root:admin, `0660`; only
   root or the logged-in console user may connect),
-- understands four commands: `PING`, `AUTO`, `SET <0-100>`, `STATUS`,
+- understands five commands: `PING`, `AUTO`, `SET <0-100>`,
+  `SET2 <p1> [<p2> …]` (per-fan percents; extras ignored, missing fans
+  repeat the last value), `STATUS`. Older helpers reject `SET2` with
+  `ERR`, and the app falls back to a single `SET`,
 - **reverts fans to Auto if the app goes silent for 15 s.**
 
 Remove it any time with `scripts/uninstall-helper.sh` — it restores
@@ -129,12 +145,12 @@ coolmac/
 
 ## Roadmap
 
-- [ ] Editable curve points (drag the dots on the chart)
-- [ ] Presets: Silent / Balanced / Full blast
-- [ ] Draggable per-fan control
-- [ ] Signed + notarized releases (Developer ID)
-- [ ] `SMAppService` helper registration (no install script)
-- [ ] Login item / launch at login
+- [x] Editable curve points (drag the dots on the chart, or use steppers)
+- [x] Presets: Silent / Balanced / Full blast
+- [x] Draggable per-fan control (unlink fans in Manual mode)
+- [ ] Signed + notarized releases (Developer ID) — blocked: needs a paid Apple Developer ID
+- [ ] `SMAppService` helper registration (no install script) — blocked: needs a full Xcode project + signing identity
+- [x] Login item / launch at login
 
 ## Contributing
 

@@ -2,8 +2,13 @@ import Foundation
 import Darwin
 
 /// Line-based Unix-socket protocol shared by the app and the root helper.
-/// Commands: `PING`, `AUTO`, `SET <percent 0-100>`, `STATUS`
+/// Commands: `PING`, `AUTO`, `SET <percent 0-100>`,
+///           `SET2 <p1> [<p2> ...]` (per-fan percents; extra values are
+///           ignored, fans past the list repeat the last value), `STATUS`
 /// Replies:  `OK ...` or `ERR ...` (single line, connection then closes)
+/// `SET`/`AUTO` are unchanged for backward compatibility; clients that
+/// send `SET2` to an old helper get `ERR unknown-command` and should
+/// fall back to `SET` with a single (e.g. max) percent.
 public enum HelperProtocol {
     public static var socketPath: String {
         ProcessInfo.processInfo.environment["COOLMAC_SOCKET"] ?? "/var/run/coolmac.sock"

@@ -12,9 +12,13 @@ struct ContentView: View {
         VStack(spacing: 14) {
             header
             fanGauges
-            modePicker
-            controlSection
-            Spacer(minLength: 0)
+            ScrollView {
+                VStack(spacing: 14) {
+                    presetRow
+                    modePicker
+                    controlSection
+                }
+            }
             footer
         }
         .padding(16)
@@ -105,6 +109,33 @@ struct ContentView: View {
         }
     }
 
+    // MARK: Presets
+
+    private var presetRow: some View {
+        HStack(spacing: 6) {
+            ForEach(FanPreset.allCases) { preset in
+                Button {
+                    model.applyPreset(preset)
+                } label: {
+                    Text(preset.rawValue)
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(
+                            model.activePreset == preset.rawValue
+                                ? Color.accentColor.opacity(0.85)
+                                : Color.primary.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 8))
+                        .foregroundStyle(
+                            model.activePreset == preset.rawValue
+                                ? Color.white : Color.primary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Preset \(preset.rawValue)")
+            }
+        }
+    }
+
     // MARK: Mode
 
     private var modePicker: some View {
@@ -147,35 +178,56 @@ struct ContentView: View {
                 }
             }
 
-            Slider(value: sliderBinding, in: 0...100, step: 1) {
-                Text("Fan speed")
-            } onEditingChanged: { editing in
-                if !editing { model.sliderChanged() }
-            }
-            .labelsHidden()
-            .onChange(of: model.manualPercent) { _ in model.sliderChanged() }
-            .disabled(model.mode == .auto)
-            .opacity(model.mode == .auto ? 0.4 : 1)
-
             HStack {
-                Text("0%").font(.system(size: 9)).foregroundStyle(.secondary)
+                Toggle("Link fans", isOn: $model.linkFans)
+                    .font(.caption)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
                 Spacer()
-                Text("50%").font(.system(size: 9)).foregroundStyle(.secondary)
-                Spacer()
-                Text("100%").font(.system(size: 9)).foregroundStyle(.secondary)
+                if !model.linkFans && model.mode == .curve {
+                    Text("Curve applies to both fans")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if model.mode == .manual && !model.linkFans {
+                perFanSliders
+            } else {
+                Slider(value: sliderBinding, in: 0...100, step: 1) {
+                    Text("Fan speed")
+                } onEditingChanged: { editing in
+                    if !editing { model.sliderChanged() }
+                }
+                .labelsHidden()
+                .onChange(of: model.manualPercent) { _ in model.sliderChanged() }
+                .disabled(model.mode == .auto)
+                .opacity(model.mode == .auto ? 0.4 : 1)
+
+                HStack {
+                    Text("0%").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("50%").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("100%").font(.system(size: 9)).foregroundStyle(.secondary)
+                }
             }
 
             if model.mode == .manual {
-                Text("Drag to set a fixed speed — or switch to Curve for automatic temperature-based control.")
+                Text(model.linkFans
+                     ? "Drag to set a fixed speed — or switch to Curve for automatic temperature-based control."
+                     : "Fans are unlinked: set each fan separately (Manual only; Curve uses one shared curve).")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
 
             if model.mode == .curve {
                 CurveChart(points: model.curvePoints, currentTemp: model.cpuTemp,
-                           currentPercent: model.targetPercent)
+                           currentPercent: model.targetPercent,
+                           onEdit: { model.updateCurvePoint(index: $0, temp: $1, percent: $2) })
                     .frame(height: 74)
                     .padding(.top, 2)
+                curvePointEditors
             }
 
             if model.mode == .auto {
@@ -186,6 +238,87 @@ struct ContentView: View {
         }
         .padding(12)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func fanPercentBinding(_ fan: Int) -> Binding<Double> {
+        Binding(
+            get: { fan < model.fanPercents.count ? model.fanPercents[fan] : 50 },
+            set: { value in
+                var next = model.fanPercents
+                while next.count <= fan { next.append(value) }
+                next[fan] = value
+                model.fanPercents = next
+            }
+        )
+    }
+
+    private var perFanSliders: some View {
+        VStack(spacing: 8) {
+            ForEach(0..<max(2, model.fans.count), id: \.self) { fan in
+                HStack(spacing: 8) {
+                    Text("Fan \(fan + 1)")
+                        .font(.caption.weight(.medium))
+                        .frame(width: 36, alignment: .leading)
+                    Slider(value: fanPercentBinding(fan), in: 0...100, step: 1) {
+                        Text("Fan \(fan + 1) speed")
+                    } onEditingChanged: { editing in
+                        if !editing { model.fanSliderChanged() }
+                    }
+                    .labelsHidden()
+                    Text(String(format: "%.0f%%", fanPercentBinding(fan).wrappedValue))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .frame(width: 38, alignment: .trailing)
+                }
+            }
+        }
+        .onChange(of: model.fanPercents) { _ in model.fanSliderChanged() }
+    }
+
+    private var curvePointEditors: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text("Curve points (drag dots or use steppers)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Reset curve") { model.resetCurve() }
+                    .controlSize(.small)
+                    .font(.system(size: 10))
+            }
+            ForEach(model.curvePoints.indices, id: \.self) { i in
+                HStack(spacing: 4) {
+                    Text("P\(i + 1)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, alignment: .leading)
+                    Stepper {
+                        Text(String(format: "%.0f°C", model.curvePoints[i].temp))
+                            .font(.system(size: 11)).monospacedDigit()
+                    } onIncrement: {
+                        model.updateCurvePoint(index: i, temp: model.curvePoints[i].temp + 1)
+                    } onDecrement: {
+                        model.updateCurvePoint(index: i, temp: model.curvePoints[i].temp - 1)
+                    }
+                    .accessibilityLabel("Point \(i + 1) temperature")
+                    Spacer()
+                    Stepper {
+                        Text(String(format: "%.0f%%", model.curvePoints[i].percent))
+                            .font(.system(size: 11)).monospacedDigit()
+                    } onIncrement: {
+                        model.updateCurvePoint(index: i, percent: model.curvePoints[i].percent + 1)
+                    } onDecrement: {
+                        model.updateCurvePoint(index: i, percent: model.curvePoints[i].percent - 1)
+                    }
+                    .accessibilityLabel("Point \(i + 1) percent")
+                }
+            }
+            if !model.linkFans {
+                Text("Unlinked fans share this curve in Curve mode; per-fan sliders are available in Manual mode.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     // MARK: Footer
@@ -213,6 +346,21 @@ struct ContentView: View {
                     .foregroundStyle(.orange)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            HStack(spacing: 8) {
+                Toggle("Launch at login", isOn: Binding(
+                    get: { model.launchAtLogin },
+                    set: { model.setLaunchAtLogin($0) }))
+                    .font(.system(size: 10))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(!model.canLaunchAtLogin)
+                if !model.canLaunchAtLogin {
+                    Text("Needs CoolMac.app bundle")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
             HStack {
                 Button("Restore Auto") { model.restoreAuto() }
                     .controlSize(.small)
@@ -231,30 +379,57 @@ struct CurveChart: View {
     let points: [(temp: Double, percent: Double)]
     let currentTemp: Double
     let currentPercent: Double
+    /// When non-nil, the point dots are draggable (index, temp, percent).
+    var onEdit: ((Int, Double, Double) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Dynamic curve — temperature → fan speed")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-            Canvas { context, size in
-                func x(_ t: Double) -> CGFloat { CGFloat((t - 30) / 70) * size.width }   // 30–100°C
-                func y(_ p: Double) -> CGFloat { size.height - CGFloat(p / 100) * size.height }
-                var line = Path()
-                for (i, pt) in points.enumerated() {
-                    let point = CGPoint(x: x(pt.temp), y: y(pt.percent))
-                    if i == 0 { line.move(to: point) } else { line.addLine(to: point) }
+            GeometryReader { geo in
+                let size = geo.size
+                let x: (Double) -> CGFloat = { CGFloat(($0 - 30) / 70) * size.width }   // 30–100°C
+                let y: (Double) -> CGFloat = { size.height - CGFloat($0 / 100) * size.height }
+                ZStack {
+                    Canvas { context, _ in
+                        var line = Path()
+                        for (i, pt) in points.enumerated() {
+                            let point = CGPoint(x: x(pt.temp), y: y(pt.percent))
+                            if i == 0 { line.move(to: point) } else { line.addLine(to: point) }
+                        }
+                        context.stroke(line, with: .color(.accentColor), lineWidth: 2)
+                        if onEdit == nil {
+                            for pt in points {
+                                let rect = CGRect(x: x(pt.temp) - 2.5, y: y(pt.percent) - 2.5, width: 5, height: 5)
+                                context.fill(Path(ellipseIn: rect), with: .color(.accentColor))
+                            }
+                        }
+                        let cx = x(min(100, max(30, currentTemp)))
+                        let cy = y(currentPercent)
+                        let dot = CGRect(x: cx - 5, y: cy - 5, width: 10, height: 10)
+                        context.fill(Path(ellipseIn: dot), with: .color(.orange))
+                        context.stroke(Path(ellipseIn: dot), with: .color(.white), lineWidth: 1.5)
+                    }
+                    if let onEdit {
+                        ForEach(points.indices, id: \.self) { i in
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 13, height: 13)
+                                .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
+                                .position(x: x(points[i].temp), y: y(points[i].percent))
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let temp = 30 + Double(value.location.x / max(1, size.width)) * 70
+                                            let percent = (1 - Double(value.location.y / max(1, size.height))) * 100
+                                            onEdit(i, temp, percent)
+                                        }
+                                )
+                                .accessibilityLabel("Curve point \(i + 1)")
+                        }
+                    }
                 }
-                context.stroke(line, with: .color(.accentColor), lineWidth: 2)
-                for pt in points {
-                    let rect = CGRect(x: x(pt.temp) - 2.5, y: y(pt.percent) - 2.5, width: 5, height: 5)
-                    context.fill(Path(ellipseIn: rect), with: .color(.accentColor))
-                }
-                let cx = x(min(100, max(30, currentTemp)))
-                let cy = y(currentPercent)
-                let dot = CGRect(x: cx - 5, y: cy - 5, width: 10, height: 10)
-                context.fill(Path(ellipseIn: dot), with: .color(.orange))
-                context.stroke(Path(ellipseIn: dot), with: .color(.white), lineWidth: 1.5)
             }
         }
     }

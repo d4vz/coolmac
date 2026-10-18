@@ -22,6 +22,8 @@ guard let smc = SMCConnection() else {
 let smcLock = NSLock()
 var manual = false
 var lastPercent: Double = -1
+/// Per-fan percents last successfully applied (normalized to fan count).
+var lastPercents: [Double] = []
 var lastSeen = Date()
 let stateLock = NSLock()
 
@@ -32,33 +34,45 @@ func setAuto() -> Bool {
     smcLock.lock(); defer { smcLock.unlock() }
     let ok = (0..<fanCount()).allSatisfy { smc.write("F\($0)md", value: .uint8("F\($0)md", 0)) }
     if ok {
-        stateLock.lock(); manual = false; lastPercent = -1; stateLock.unlock()
+        stateLock.lock(); manual = false; lastPercent = -1; lastPercents = []; stateLock.unlock()
     }
     return ok
 }
 
+/// Per-fan set: extra percents are ignored; fans beyond the supplied
+/// list repeat the last supplied value (so `SET2 40` == `SET 40`).
 @discardableResult
-func setPercent(_ percent: Double) -> Bool {
-    let pct = min(100, max(0, percent))
+func setPercents(_ percents: [Double]) -> Bool {
+    guard !percents.isEmpty else { return false }
+    let count = fanCount()
+    guard count > 0 else { return false }
+    let normalized = (0..<count).map { fan in
+        min(100, max(0, percents[min(fan, percents.count - 1)]))
+    }
     stateLock.lock()
-    let unchanged = manual && abs(pct - lastPercent) < 1
+    let unchanged = manual && normalized.count == lastPercents.count
+        && zip(normalized, lastPercents).allSatisfy { abs($0 - $1) < 1 }
     stateLock.unlock()
     if unchanged { return true }
 
     smcLock.lock(); defer { smcLock.unlock() }
     var ok = true
-    for fan in 0..<fanCount() {
+    for fan in 0..<count {
         guard let lo = smc.read("F\(fan)Mn")?.double,
               let hi = smc.read("F\(fan)Mx")?.double else { ok = false; continue }
-        let rpm = lo + (hi - lo) * pct / 100.0
+        let rpm = lo + (hi - lo) * normalized[fan] / 100.0
         ok = smc.write("F\(fan)md", value: .uint8("F\(fan)md", 1)) && ok
         ok = smc.write("F\(fan)Tg", value: .float("F\(fan)Tg", rpm)) && ok
     }
     if ok {
-        stateLock.lock(); manual = true; lastPercent = pct; stateLock.unlock()
+        stateLock.lock(); manual = true; lastPercents = normalized
+        lastPercent = normalized.first ?? -1; stateLock.unlock()
     }
     return ok
 }
+
+@discardableResult
+func setPercent(_ percent: Double) -> Bool { setPercents([percent]) }
 
 func status() -> String {
     smcLock.lock(); defer { smcLock.unlock() }
@@ -95,6 +109,13 @@ func handle(_ command: String) -> String {
     case "SET":
         guard parts.count == 2, let pct = Double(parts[1]) else { return "ERR usage: SET <0-100>" }
         return setPercent(pct) ? "OK set \(Int(min(100, max(0, pct))))%" : "ERR smc-write-failed"
+    case "SET2":
+        let pcts = parts.dropFirst().compactMap { Double($0) }
+        guard !pcts.isEmpty, pcts.count == parts.count - 1 else { return "ERR usage: SET2 <0-100> [<0-100> ...]" }
+        let clamped = pcts.map { min(100, max(0, $0)) }
+        return setPercents(clamped)
+            ? "OK set2 " + clamped.map { "\(Int($0))%" }.joined(separator: " ")
+            : "ERR smc-write-failed"
     case "STATUS":
         return "OK " + status()
     default:
