@@ -324,8 +324,14 @@ struct CurveChart: View {
                 .foregroundStyle(.secondary)
             GeometryReader { geo in
                 let size = geo.size
-                let x: (Double) -> CGFloat = { CGFloat(($0 - 30) / 70) * size.width }   // 30–100°C
-                let y: (Double) -> CGFloat = { size.height - CGFloat($0 / 100) * size.height }
+                // Inset the plot so dots at the temp/percent extremes render
+                // whole inside the bounds (draggable dot: 6.5pt radius +
+                // half its 1.5pt stroke = 7.25pt; current dot: 5.75pt).
+                let inset: CGFloat = 8
+                let plotWidth = max(1, size.width - inset * 2)
+                let plotHeight = max(1, size.height - inset * 2)
+                let x: (Double) -> CGFloat = { inset + CGFloat(($0 - 30) / 70) * plotWidth }   // 30–100°C
+                let y: (Double) -> CGFloat = { inset + (1 - CGFloat($0 / 100)) * plotHeight }
                 ZStack {
                     Canvas { context, _ in
                         var line = Path()
@@ -356,8 +362,9 @@ struct CurveChart: View {
                                 .gesture(
                                     DragGesture(minimumDistance: 0)
                                         .onChanged { value in
-                                            let temp = 30 + Double(value.location.x / max(1, size.width)) * 70
-                                            let percent = (1 - Double(value.location.y / max(1, size.height))) * 100
+                                            // Invert the same inset mapping used to place the dots.
+                                            let temp = 30 + Double((value.location.x - inset) / plotWidth) * 70
+                                            let percent = (1 - Double((value.location.y - inset) / plotHeight)) * 100
                                             onEdit(i, temp, percent)
                                         }
                                 )
