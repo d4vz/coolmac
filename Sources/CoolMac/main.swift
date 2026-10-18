@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Fixed length, monospaced digits: a variable-length item moves
         // in the menu bar every time the temp text changes width,
         // and the popover anchored to it jumps around (or clips).
-        statusItem = NSStatusBar.system.statusItem(withLength: 48)
+        statusItem = NSStatusBar.system.statusItem(withLength: 38)
         if let button = statusItem.button {
             button.action = #selector(togglePopover(_:))
             button.target = self

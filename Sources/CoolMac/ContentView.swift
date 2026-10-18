@@ -9,9 +9,9 @@ struct ContentView: View {
     static func popoverSize(mode: ControlMode) -> NSSize {
         let height: CGFloat
         switch mode {
-        case .auto: height = 332
-        case .curve: height = 516
-        case .manual: height = 428
+        case .auto: height = 300
+        case .curve: height = 484
+        case .manual: height = 396
         }
         return NSSize(width: 352, height: height)
     }
@@ -26,7 +26,7 @@ struct ContentView: View {
                 controlSection
             }
             Spacer(minLength: 0)
-            footer
+            warnings
         }
         .padding(12)
         .frame(width: 352, height: Self.popoverSize(mode: model.mode).height)
@@ -69,7 +69,32 @@ struct ContentView: View {
                 }
             }
             Spacer()
+            settingsMenu
         }
+    }
+
+    /// ⚙️ menu, top-right of the header: link fans, launch at login,
+    /// restore-Auto, curve reset, quit. No disclosure arrow.
+    private var settingsMenu: some View {
+        Menu {
+            Toggle("Link fans", isOn: $model.linkFans)
+            Toggle("Launch at login", isOn: Binding(
+                get: { model.launchAtLogin },
+                set: { model.setLaunchAtLogin($0) }))
+                .disabled(!model.canLaunchAtLogin)
+            Divider()
+            Button("Restore Auto") { model.restoreAuto() }
+            Button("Reset curve") { model.resetCurve() }
+            Divider()
+            Button("Quit CoolMac") { NSApplication.shared.terminate(nil) }
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 13))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 22, alignment: .trailing)
+        .help(model.canLaunchAtLogin ? "Settings" : "Settings (Launch at login needs the CoolMac.app bundle)")
     }
 
     private var tempColor: Color {
@@ -254,9 +279,9 @@ struct ContentView: View {
         .onChange(of: model.fanPercents) { _ in model.fanSliderChanged() }
     }
 
-    // MARK: Footer
+    // MARK: Warnings (only visible when something is wrong)
 
-    private var footer: some View {
+    private var warnings: some View {
         VStack(spacing: 6) {
             if !model.helperConnected {
                 Label("Helper not installed — run scripts/install-helper.sh", systemImage: "exclamationmark.triangle")
@@ -275,27 +300,6 @@ struct ContentView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            HStack {
-                Menu {
-                    Toggle("Link fans", isOn: $model.linkFans)
-                    Toggle("Launch at login", isOn: Binding(
-                        get: { model.launchAtLogin },
-                        set: { model.setLaunchAtLogin($0) }))
-                        .disabled(!model.canLaunchAtLogin)
-                    Divider()
-                    Button("Restore Auto") { model.restoreAuto() }
-                    Button("Reset curve") { model.resetCurve() }
-                    Divider()
-                    Button("Quit CoolMac") { NSApplication.shared.terminate(nil) }
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 13))
-                }
-                .menuStyle(.borderlessButton)
-                .frame(width: 28, alignment: .leading)
-                .help(model.canLaunchAtLogin ? "Settings" : "Settings (Launch at login needs the CoolMac.app bundle)")
-                Spacer()
             }
         }
     }
