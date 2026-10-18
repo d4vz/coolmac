@@ -182,13 +182,16 @@ struct ContentView: View {
 
     // MARK: Slider / curve
 
+    // No `step:` on the sliders — AppKit draws tick marks for stepped
+    // sliders. Round in the bindings instead so values still snap to
+    // whole percents.
     /// In Manual the slider is the setpoint. In Curve it follows the
     /// live curve target — dragging it switches to Manual (the
     /// Macs Fan Control behaviour). Disabled in Auto.
     private var sliderBinding: Binding<Double> {
         Binding(
             get: { model.mode == .manual ? model.manualPercent : max(0, model.targetPercent) },
-            set: { model.manualPercent = $0 }
+            set: { model.manualPercent = $0.rounded() }
         )
     }
 
@@ -213,7 +216,7 @@ struct ContentView: View {
             if model.mode == .manual && !model.linkFans {
                 perFanSliders
             } else {
-                Slider(value: sliderBinding, in: 0...100, step: 1) {
+                Slider(value: sliderBinding, in: 0...100) {
                     Text("Fan speed")
                 } onEditingChanged: { editing in
                     if !editing { model.sliderChanged() }
@@ -249,8 +252,8 @@ struct ContentView: View {
             get: { fan < model.fanPercents.count ? model.fanPercents[fan] : 50 },
             set: { value in
                 var next = model.fanPercents
-                while next.count <= fan { next.append(value) }
-                next[fan] = value
+                while next.count <= fan { next.append(value.rounded()) }
+                next[fan] = value.rounded()
                 model.fanPercents = next
             }
         )
@@ -263,7 +266,7 @@ struct ContentView: View {
                     Text("Fan \(fan + 1)")
                         .font(.caption.weight(.medium))
                         .frame(width: 36, alignment: .leading)
-                    Slider(value: fanPercentBinding(fan), in: 0...100, step: 1) {
+                    Slider(value: fanPercentBinding(fan), in: 0...100) {
                         Text("Fan \(fan + 1) speed")
                     } onEditingChanged: { editing in
                         if !editing { model.fanSliderChanged() }
